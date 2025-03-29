@@ -1,0 +1,680 @@
+substitutions:
+  device_name: "notion-database-viewer"
+  friendly_name: Notion Database Viewer
+  display_model: gdey075t7
+  display_rotation: "0"
+  display_update_interval: "never"
+  display_full_update_every: "30"
+  text_font: "resources/fonts/jf-openhuninn-2.1.ttf"
+  text_font_size: "30"
+  timestamp_font: "resources/fonts/jf-openhuninn-2.1.ttf"
+  timestamp_font_size: "20"
+
+  default_title: "Notion Database"
+  default_columns: "" # List of columns to display, separated by commas. e.g. "Name,Status,Date"
+  default_columns_widths: "" # List of columns widths, separated by commas. e.g. "100,50,100"
+  default_json_parse_buffer_size: "20" # kilobytes
+  default_query_update_interval: "1" # minutes
+  default_api_watchdog_timeout: "15" # seconds
+  default_page_size: "4"
+  default_line_height: "40"
+  default_date_format: "%Y-%m-%d"
+  default_datetime_format: "%Y-%m-%d %H:%M" # see https://en.cppreference.com/w/cpp/chrono/c/strftime
+  default_text_overflow: "ELLIPSIS"
+  default_list_style_type: "• "
+
+packages:
+  board: !include boards/esp32s3/nologo_esp32_s3_devkitc_1_epd_v1.yaml
+  device_web: !include templates/device_standalone.yaml
+  epd_toolkit: !include common/epd/toolkit.yaml
+  epd_toolkit_ext: !include common/epd/toolkit_ext.yaml
+  epd_metrics: !include common/epd/metrics.yaml
+  debug: !include common/debug_esp32.yaml
+
+external_components:
+  - source: ../../components
+    components: [notion_database, notion_database_table_view]
+
+  - source: github://parkghost/epd
+    components: [ waveshare_epaper ]
+
+logger:
+  level: VERBOSE
+  # baud_rate: 0
+
+# esphome:
+#   platformio_options:
+#     board_build.partitions: C:\...\boards\partitions\partitions_4m_no_ota.csv # absolute path
+
+preferences:
+  flash_write_interval: 5s
+
+globals:
+  - id: initial
+    type: bool
+    initial_value: "false"
+
+  - id: timer_counter
+    type: int
+    initial_value: "0"
+
+web_server:
+  version: 3
+  sorting_groups:
+    - id: main_group
+      name: "Main"
+      sorting_weight: -10
+    - id: notion_api_group
+      name: "Notion API"
+      sorting_weight: -9
+    - id: notion_database_query_group
+      name: "Database Query"
+      sorting_weight: -8
+    - id: notion_table_group
+      name: "Table View"
+      sorting_weight: -7
+
+notion_database:
+  - id: my_notion_db
+    api_token: !lambda return id(api_token).state;
+    update_interval: never
+    json_parse_buffer_size: !lambda return id(json_parse_buffer_size).state * 1024;
+    watchdog_timeout: !lambda return id(api_watchdog_timeout).state * 1000;
+    on_page_change:
+      then:
+        - lambda: |-
+            std::string properties = "";
+            for (std::string property : id(my_notion_db)->get_available_properties()) {
+              properties += property + ",";
+            }
+            properties.pop_back();
+            id(available_properties)->publish_state(properties);
+        - script.execute: fire_refresh_event
+
+notion_database_table_view:
+  - id: my_table_view
+    notion_database_id: my_notion_db
+    title: !lambda return id(title).state;
+    enable_title: !lambda return id(enable_title).state;
+    enable_header: !lambda return id(enable_header).state;
+    enable_grid_line: !lambda return id(enable_grid_line).state;
+    list_style_type: !lambda return id(list_style_type).state;
+    enable_list_style: !lambda return id(enable_list_style).state;
+    line_height: !lambda return id(line_height).state;
+    date_format: !lambda return id(date_format).state;
+    datetime_format: !lambda return id(datetime_format).state;
+    invert_title_color: !lambda return id(invert_title_color).state;
+    invert_header_color: !lambda return id(invert_header_color).state;
+    text_overflow: !lambda |-
+      return id(text_overflow).state == "ELLIPSIS" ? notion_database::TextOverflow::ELLIPSIS : notion_database::TextOverflow::CLIP;
+
+time:
+  - platform: sntp
+    id: !extend esp_time
+    on_time:
+      - cron: "0 0 4 * * *"
+        then:
+          - lambda: id(my_display).full_refresh();
+
+interval:
+  - interval: 1min
+    then:
+      - lambda: |-
+          id(timer_counter)++;
+          if(id(timer_counter) % static_cast<int>(id(query_update_interval).state) == 0){
+            id(pull_database).execute();
+          }
+
+wifi:
+  on_connect:
+    - delay: 3s # wait for the other components to be initialized
+    - globals.set:
+        id: initial
+        value: "true"
+    - script.execute: pull_database
+
+text:
+  - platform: template
+    id: api_token
+    name: "API Token"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    restore_value: true
+    web_server:
+      sorting_group_id: notion_api_group
+      sorting_weight: 10
+    on_value:
+      - lambda: id(my_notion_db).reset_state();
+      - script.execute: pull_database
+
+  - platform: template
+    id: database_id
+    name: "Query - Database ID"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    restore_value: true
+    web_server:
+      sorting_group_id: notion_database_query_group
+      sorting_weight: 30
+    on_value:
+      - lambda: id(my_notion_db).reset_state();
+      - script.execute: pull_database
+
+  # For more information, please refer to https://developers.notion.com/reference/post-database-query
+  - platform: template
+    id: query_filter
+    name: "Query - Filter"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    restore_value: true
+    web_server:
+      sorting_group_id: notion_database_query_group
+      sorting_weight: 40
+    on_value:
+      - lambda: id(my_notion_db).reset_state();
+      - script.execute: pull_database
+
+  - platform: template
+    id: query_sorts
+    name: "Query - Sorts"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    restore_value: true
+    web_server:
+      sorting_group_id: notion_database_query_group
+      sorting_weight: 50
+    on_value:
+      - lambda: id(my_notion_db).reset_state();
+      - script.execute: pull_database
+
+  - platform: template
+    id: title
+    name: "Table - Title"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    restore_value: true
+    initial_value: $default_title
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 200
+    on_value:
+      - script.execute: fire_refresh_event
+
+  - platform: template
+    id: columns
+    name: "Table - Columns"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    restore_value: true
+    initial_value: $default_columns
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 120
+    on_value:
+      - lambda:  |-
+          std::vector<std::string> columns;
+          if(!x.empty()){
+            std::stringstream ss(x);
+            std::string token;
+            while (std::getline(ss, token, ',')) {
+              auto trimmed_column = token;
+              trimmed_column.erase(0, trimmed_column.find_first_not_of(" \t\n\r"));
+              trimmed_column.erase(trimmed_column.find_last_not_of(" \t\n\r") + 1);
+              if(!trimmed_column.empty()){
+                columns.push_back(trimmed_column);
+              }
+            }
+          }
+
+          id(my_table_view).set_columns(columns);
+          std::set<std::string> columns_set(columns.begin(), columns.end());
+          id(my_notion_db).set_property_filters(columns_set);
+
+      - script.execute: pull_database
+
+  - platform: template
+    id: columns_widths
+    name: "Table - Columns Widths"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    restore_value: true
+    initial_value: $default_columns_widths
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 130
+    on_value:
+      - lambda: |-
+          std::vector<int> column_widths;
+          if(!x.empty()){
+            std::stringstream ss(x);
+            std::string token;
+            while (std::getline(ss, token, ',')) {
+              if (!token.empty()) {
+                auto trimmed_column = token;
+                trimmed_column.erase(0, trimmed_column.find_first_not_of(" \t\n\r"));
+                trimmed_column.erase(trimmed_column.find_last_not_of(" \t\n\r") + 1);
+                if(!trimmed_column.empty()){
+                  int width = std::stoi(trimmed_column);
+                  column_widths.push_back(width);
+                }
+              }
+            }
+          }
+          id(my_table_view).set_column_widths(column_widths);
+
+      - script.execute: fire_refresh_event
+
+  - platform: template
+    id: date_format
+    name: "Table - Date Format"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    restore_value: true
+    initial_value: $default_date_format
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 410
+    on_value:
+      - script.execute: fire_refresh_event
+
+  - platform: template
+    id: datetime_format
+    name: "Table - Datetime Format"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    restore_value: true
+    initial_value: $default_datetime_format
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 420
+    on_value:
+      - script.execute: fire_refresh_event
+
+  - platform: template
+    id: list_style_type
+    name: "Table - List Style Type"
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    restore_value: true
+    initial_value: $default_list_style_type
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 310
+    on_value:
+      - script.execute: fire_refresh_event
+
+text_sensor:
+  - platform: template
+    id: available_properties
+    name: "Available Properties"
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 110
+
+number:
+  - platform: template
+    id: json_parse_buffer_size
+    name: "JSON Parse Buffer Size (KB)"
+    mode: box
+    min_value: 20
+    max_value: 8192
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: $default_json_parse_buffer_size
+    web_server:
+      sorting_group_id: notion_api_group
+      sorting_weight: 20
+    on_value:
+      - script.execute: pull_database
+
+  - platform: template
+    id: query_update_interval
+    name: "Query - Update Interval (Minutes)"
+    mode: box
+    min_value: 1
+    max_value: 1680
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: $default_query_update_interval
+    web_server:
+      sorting_group_id: notion_database_query_group
+      sorting_weight: 20
+    on_value:
+      - script.execute: pull_database
+
+  - platform: template
+    id: api_watchdog_timeout
+    name: "Watchdog Timeout (Seconds)"
+    mode: box
+    min_value: 1
+    max_value: 1680
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: $default_api_watchdog_timeout
+    web_server:
+      sorting_group_id: notion_api_group
+      sorting_weight: 30
+    on_value:
+      - script.execute: pull_database
+
+  - platform: template
+    id: query_page_size
+    name: "Query - Page Size"
+    mode: box
+    min_value: 0
+    max_value: 100
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: $default_page_size
+    web_server:
+      sorting_group_id: notion_database_query_group
+      sorting_weight: 60
+    on_value:
+      - lambda: id(my_notion_db).reset_state();
+      - script.execute: pull_database
+
+  - platform: template
+    id: line_height
+    name: "Table - Line Height"
+    mode: box
+    min_value: 0
+    max_value: 100
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: $default_line_height
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 140
+    on_value:
+      - script.execute: fire_refresh_event
+
+switch:
+  - platform: template
+    id: enable_last_updated
+    name: "Show Last Updated"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_group_id: main_group
+      sorting_weight: 2
+    on_turn_on:
+      - script.execute: fire_refresh_event
+    on_turn_off:
+      - script.execute: fire_refresh_event
+
+  - platform: template
+    id: enable_title
+    name: "Table - Show Title"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 210
+    on_turn_on:
+      - script.execute: fire_refresh_event
+    on_turn_off:
+      - script.execute: fire_refresh_event
+
+  - platform: template
+    id: invert_title_color
+    name: "Table - Invert Title Color"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 220
+    on_turn_on:
+      - script.execute: fire_refresh_event
+    on_turn_off:
+      - script.execute: fire_refresh_event
+
+  - platform: template
+    id: enable_header
+    name: "Table - Show Header"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 230
+    on_turn_on:
+      - script.execute: fire_refresh_event
+    on_turn_off:
+      - script.execute: fire_refresh_event
+
+  - platform: template
+    id: invert_header_color
+    name: "Table - Invert Header Color"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 240
+    on_turn_on:
+      - script.execute: fire_refresh_event
+    on_turn_off:
+      - script.execute: fire_refresh_event
+
+  - platform: template
+    id: enable_grid_line
+    name: "Table - Show Grid Line"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 300
+    on_turn_on:
+      - script.execute: fire_refresh_event
+    on_turn_off:
+      - script.execute: fire_refresh_event
+
+  - platform: template
+    id: enable_list_style
+    name: "Table - Enable List Style"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 320
+    on_turn_on:
+      - script.execute: fire_refresh_event
+    on_turn_off:
+      - script.execute: fire_refresh_event
+
+select:
+  - platform: template
+    id: text_overflow
+    name: "Table - Text Overflow"
+    optimistic: true
+    restore_value: true
+    web_server:
+      sorting_group_id: notion_table_group
+      sorting_weight: 400
+    options:
+      - ELLIPSIS
+      - CLIP
+    initial_option: $default_text_overflow
+    on_value:
+      - script.execute: fire_refresh_event
+
+button:
+  - platform: template
+    name: "Query - Execute"
+    web_server:
+      sorting_group_id: notion_database_query_group
+      sorting_weight: 10
+    on_press:
+      - script.execute: pull_database
+
+  - platform: template
+    name: "Query - First Page"
+    web_server:
+      sorting_group_id: notion_database_query_group
+      sorting_weight: 11
+    on_press:
+      - notion_database.first_page: my_notion_db
+
+  - platform: template
+    name: "Query - Previous Page"
+    web_server:
+      sorting_group_id: notion_database_query_group
+      sorting_weight: 12
+    on_press:
+      - notion_database.prev_page: my_notion_db
+
+  - platform: template
+    name: "Query - Next Page"
+    web_server:
+      sorting_group_id: notion_database_query_group
+      sorting_weight: 13
+    on_press:
+      - notion_database.next_page: my_notion_db
+
+script:
+  - id: fire_refresh_event
+    mode: single
+    then:
+      - lambda: |-
+          if(!id(initial)){
+            return;
+          }
+          id(refresh_and_wait).execute("");
+      - delay: 100ms
+
+  - id: pull_database
+    mode: single
+    then:
+      - delay: 1s
+      - lambda: |-
+          if(!id(initial)){
+            return;
+          }
+          if (!id(wifi_id).is_connected()) {
+            return;
+          }
+
+          auto db = id(my_notion_db);
+          if(id(database_id).has_state() && id(database_id).state.empty()){
+            ESP_LOGE("notion", "Database ID not set");
+            return;
+          }
+          db->set_database_id(id(database_id).state);
+
+          StaticJsonDocument<1024> doc;
+          if(id(query_filter).has_state() && !id(query_filter).state.empty()){
+            StaticJsonDocument<1024> filterDoc;
+            if(deserializeJson(filterDoc, id(query_filter).state) != DeserializationError::Ok){
+              ESP_LOGE("notion", "Invalid filter: %s", id(query_filter).state.c_str());
+              return;
+            }
+            doc["filter"] = filterDoc;
+          }
+
+          if(id(query_sorts).has_state() && !id(query_sorts).state.empty()){
+            StaticJsonDocument<1024> sortsDoc;
+            if(deserializeJson(sortsDoc, id(query_sorts).state) != DeserializationError::Ok){
+              ESP_LOGE("notion", "filter: %s", id(query_filter).state.c_str());
+            }
+            doc["sorts"] = sortsDoc;
+          }
+
+          if(id(query_page_size).state > 0){
+            doc["page_size"] = id(query_page_size).state;
+          }
+
+          char query[1024];
+          serializeJson(doc, query);
+          db->set_query(std::string(query));
+
+          db->update();
+          id(timer_counter) = 0;
+      - delay: 1s
+
+font:
+  - file: $text_font
+    id: tc_font_30
+    size: $text_font_size
+    glyphsets:
+      - GF_Latin_Kernel
+    ignore_missing_glyphs: true
+    glyphs:
+      - !include resources/glyphsets/tc_jf7000.yaml
+      # - !include resources/glyphsets/tc_custom.yaml
+
+  - file: $timestamp_font
+    id: timestamp_font
+    size: $timestamp_font_size
+    glyphs: " .-:0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+display:
+  - platform: waveshare_epaper
+    id: !extend my_display
+    model: $display_model
+    rotation: $display_rotation
+    update_interval: $display_update_interval
+    full_update_every: $display_full_update_every
+    lambda: |-
+      auto BLACK   = Color(0,   0,   0,   0);
+      auto RED     = Color(255, 0,   0,   0);
+      auto WHITE   = Color(255, 255, 255, 0);
+
+      if (it.get_display_type() == DisplayType::DISPLAY_TYPE_BINARY) {
+        BLACK = COLOR_ON;
+        WHITE = COLOR_OFF;
+      } else if (it.get_display_type() == DisplayType::DISPLAY_TYPE_COLOR) {
+        it.fill(WHITE);
+      }
+      int screen_width = it.get_width();
+      int screen_height = it.get_height();
+
+      if (id(display_white_screen).state) {
+        return;
+      }
+
+      if (!id(wifi_id).is_connected()) {
+        it.print(screen_width / 2, screen_height / 2, id(tc_font_30), BLACK,
+                  TextAlign::CENTER, "WiFi Connecting");
+        return;
+      }
+
+      int top_offset = 0;
+      int bottom_offset = 0;
+      if (id(enable_last_updated).state) {
+        bottom_offset = $timestamp_font_size;
+      }
+
+      id(my_table_view).draw(it, 0, top_offset, screen_width, screen_height - top_offset - bottom_offset, id(tc_font_30), BLACK, WHITE);
+
+      auto tm = id(esp_time).now();
+      if (!tm.is_valid()) {
+        return;
+      }
+      if (id(enable_last_updated).state) {
+        it.strftime(screen_width - $timestamp_font_size/2, screen_height - 3, id(timestamp_font), BLACK,
+                    TextAlign::BOTTOM_RIGHT, "Last Updated: %Y-%m-%d %H:%M", tm);
+      }

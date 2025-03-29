@@ -1,0 +1,135 @@
+# Template: https://www.notion.com/templates/reading-tracker-281
+
+substitutions:
+  device_name: "reading-tracker"
+  friendly_name: Reading Tracker
+
+external_components:
+  - source: github://parkghost/epd
+    components: [ waveshare_epaper ]
+
+  - source: ../components
+    components: [notion_database, notion_database_table_view]
+
+logger:
+  level: DEBUG
+  # baud_rate: 0
+
+esphome:
+  name: $device_name
+  friendly_name: $friendly_name
+
+  platformio_options:
+    board_build.arduino.memory_type: qio_opi
+    board_build.flash_mode: qio
+    build_flags:
+      - "-DCONFIG_SPIRAM_CACHE_WORKAROUND"
+      - "-mfix-esp32-psram-cache-issue"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: arduino
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+notion_database:
+  - id: db1
+    api_token: yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+    database_id: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    json_parse_buffer_size: 30kb
+    update_interval: 1min
+    query: |-
+      {
+        "filter":{
+            "property":"Status",
+            "status":{
+              "equals":"Read"
+            }
+        },
+        "sorts":[
+            {
+              "timestamp":"last_edited_time",
+              "direction":"ascending"
+            }
+        ],
+        "page_size":20
+      }
+    property_filters:
+      - Name
+      - Author
+      - Genre
+    on_page_change:
+      then:
+        - component.update: my_display
+
+notion_database_table_view:
+  - id: view1
+    notion_database_id: db1
+    columns:
+      - Name
+      - Author
+      - Genre
+    column_widths:
+      - 400
+      - 200
+      - 200
+    line_height: 40
+    title: "Reading Tracker"
+    enable_title: true
+    invert_title_color: true
+    enable_header: true
+    invert_header_color: false
+    enable_grid_line: true
+
+button:
+  - platform: template
+    name: "Query - Execute"
+    on_press:
+      - component.update: db1
+
+  - platform: template
+    name: "Query - First Page"
+    on_press:
+      - notion_database.first_page: db1
+
+  - platform: template
+    name: "Query - Previous Page"
+    on_press:
+      - notion_database.prev_page: db1
+
+  - platform: template
+    name: "Query - Next Page"
+    on_press:
+      - notion_database.next_page: db1
+
+font:
+  - file: "gfonts://Roboto"
+    id: roboto_30
+    size: 30
+
+spi:
+  clk_pin: GPIO12
+  mosi_pin: GPIO11
+
+display:
+  - platform: waveshare_epaper
+    id: my_display
+    model: gdey075t7
+    reset_pin: GPIO13
+    dc_pin: GPIO14
+    cs_pin: GPIO10
+    busy_pin: GPIO9
+    rotation: 0
+    update_interval: never
+    full_update_every: 10
+    lambda: |-
+      id(view1).draw(it, 0, 0, it.get_width(), it.get_height(), id(roboto_30), COLOR_ON, COLOR_OFF);
