@@ -5,7 +5,7 @@ substitutions:
   friendly_name: Reading Tracker
 
 external_components:
-  - source: github://parkghost/epd
+  - source: github://parkghost/esphome-epaper
     components: [ waveshare_epaper ]
 
   - source: ../components

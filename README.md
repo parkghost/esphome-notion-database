@@ -208,4 +208,4 @@ display:
 
 *   [Notion API Documentation](https://developers.notion.com/)
 *   [Waveshare E-Paper Display](https://esphome.io/components/display/waveshare_epaper.html)
-*   [More E-Paper Display](https://github.com/parkghost/epd)
+*   [More E-Paper Display](https://github.com/parkghost/esphome-epaper)

@@ -14,7 +14,7 @@ substitutions:
   timestamp_font_size: "20"  
 
 external_components:
-  - source: github://parkghost/epd
+  - source: github://parkghost/esphome-epaper
     components: [ waveshare_epaper ]
 
   - source: ../components
