@@ -11,7 +11,7 @@ substitutions:
   line_height: "40"
   page_size: "10"
   text_font_size: "30"
-  timestamp_font_size: "20"  
+  timestamp_font_size: "20"
 
 external_components:
   - source: github://parkghost/esphome-epaper
@@ -164,31 +164,37 @@ button:
     name: "DB1 Query - First Page"
     on_press:
       - notion_database.first_page: db1
+      - script.execute: check_changes
 
   - platform: template
     name: "DB1 Query - Previous Page"
     on_press:
       - notion_database.prev_page: db1
+      - script.execute: check_changes
 
   - platform: template
     name: "DB1 Query - Next Page"
     on_press:
       - notion_database.next_page: db1
+      - script.execute: check_changes
 
   - platform: template
     name: "DB2 Query - First Page"
     on_press:
       - notion_database.first_page: db2
+      - script.execute: check_changes
 
   - platform: template
     name: "DB2 Query - Previous Page"
     on_press:
       - notion_database.prev_page: db2
+      - script.execute: check_changes
 
   - platform: template
     name: "DB2 Query - Next Page"
     on_press:
-      - notion_database.next_page: db2      
+      - notion_database.next_page: db2
+      - script.execute: check_changes
 
 script:
   - id: pull_database
@@ -204,6 +210,20 @@ script:
 
           id(db1)->update();
           id(db2)->update();
+          id(check_changes).execute();
+      - delay: 1s
+
+  - id: check_changes
+    mode: single
+    then:
+      - lambda: |-
+          if(!id(initial)){
+            return;
+          }
+          if (!id(wifi_id).is_connected()) {
+            return;
+          }
+
           if(id(db1).has_page_change() || id(db2).has_page_change()) {
             id(refresh_display).execute();
           }
