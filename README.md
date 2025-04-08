@@ -29,7 +29,7 @@ This component retrieves data from a Notion database using the Notion API.
 *   **`json_parse_buffer_size`** (Optional, [Data Size](https://esphome.io/guides/configuration-types.html#config-data-size)): The size of the buffer to use to parse the JSON response from the Notion API. Defaults to `20kB`. Adjust this value based on the available heap or PSRAM size to ensure stability.
 *   **`update_interval`** (Optional, [Time](https://esphome.io/guides/configuration-types.html#config-time)): The interval to poll the Notion API for changes. Defaults to `60s`.
 
-#### Automation 
+#### Automation
 
 ##### Automation Triggers:
 
