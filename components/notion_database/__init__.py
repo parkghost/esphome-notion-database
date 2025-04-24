@@ -33,7 +33,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_QUERY, default=""): cv.templatable(cv.string),
             cv.Optional(CONF_PROPERTY_FILTERS, default=[]): cv.ensure_list(cv.string),
             cv.Optional(CONF_ON_PAGE_CHANGE): automation.validate_automation(),
-            cv.Optional(CONF_WATCHDOG_TIMEOUT, default="15s"): cv.templatable(cv.All(
+            cv.Optional(CONF_WATCHDOG_TIMEOUT, default="30s"): cv.templatable(cv.All(
                 cv.positive_not_null_time_period,
                 cv.positive_time_period_milliseconds,
             )),
