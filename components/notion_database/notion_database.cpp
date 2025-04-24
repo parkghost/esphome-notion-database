@@ -58,7 +58,6 @@ void NotionDatabase::dump_config() {
   ESP_LOGCONFIG(TAG, "  Database ID: %s", database_id_.value().c_str());
   ESP_LOGCONFIG(TAG, "  Query: %s", query_.value().c_str());
   ESP_LOGCONFIG(TAG, "  Watchdog Timeout: %u", watchdog_timeout_.value());
-  ESP_LOGCONFIG(TAG, "  Verify SSL: %s", verify_ssl_.value() ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  HTTP Connect Timeout: %u", http_connect_timeout_.value());
   ESP_LOGCONFIG(TAG, "  HTTP Timeout: %u", http_timeout_.value());
   ESP_LOGCONFIG(TAG, "  JSON Parser Buffer Size: %u", json_parse_buffer_size_.value());
@@ -103,11 +102,7 @@ bool NotionDatabase::send_request_() {
   std::string url = "https://api.notion.com/v1/databases/" + database_id_.value() + "/query";
 
   HTTPClient http;
-  // Disable SSL verification if configured
-  if (!verify_ssl_.value()) {
-    client_.setInsecure();
-  }
-  http.begin(client_, url.c_str());
+  http.begin(url.c_str());
   http.useHTTP10(true);
   http.setConnectTimeout(http_connect_timeout_.value());
   http.setTimeout(http_timeout_.value());

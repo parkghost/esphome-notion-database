@@ -4,8 +4,6 @@
  * @brief Header for Notion Database component.
  */
 
-#include <WiFiClientSecure.h>
-
 #include <set>
 #include <sstream>  // add if not already included
 #include <string>
@@ -258,12 +256,6 @@ class NotionDatabase : public PollingComponent {
     watchdog_timeout_ = watchdog_timeout;
   }
 
-  // Sets the verify_ssl flag
-  template <typename V>
-  void set_verify_ssl(V verify_ssl) {
-    verify_ssl_ = verify_ssl;
-  }
-
   // Sets the HTTP connect timeout
   template <typename V>
   void set_http_connect_timeout(V http_connect_timeout) {
@@ -330,12 +322,10 @@ class NotionDatabase : public PollingComponent {
   Trigger<> on_page_change_trigger_{};
 
   TemplatableValue<uint32_t> watchdog_timeout_;
-  TemplatableValue<bool> verify_ssl_;
   TemplatableValue<uint32_t> http_connect_timeout_;
   TemplatableValue<uint32_t> http_timeout_;
   TemplatableValue<uint32_t> json_parse_buffer_size_;
 
-  WiFiClientSecure client_;
   std::set<std::string> available_properties_;
   std::set<std::string> property_filters_;
   std::vector<Page, Allocator<Page>> pages_;

@@ -23,7 +23,6 @@ CONF_WATCHDOG_TIMEOUT = "watchdog_timeout"
 CONF_HTTP_CONNECT_TIMEOUT = "http_connect_timeout"
 CONF_HTTP_TIMEOUT = "http_timeout"
 CONF_JSON_PARSE_BUFFER_SIZE = "json_parse_buffer_size"
-CONF_VERIFY_SSL = "verify_ssl"
 
 CONFIG_SCHEMA = cv.All(
     cv.ensure_list(
@@ -38,7 +37,6 @@ CONFIG_SCHEMA = cv.All(
                 cv.positive_not_null_time_period,
                 cv.positive_time_period_milliseconds,
             )),
-            cv.Optional(CONF_VERIFY_SSL, default=False): cv.templatable(cv.boolean),
             cv.Optional(CONF_HTTP_CONNECT_TIMEOUT, default="5s"): cv.templatable(cv.All(
                 cv.positive_not_null_time_period,
                 cv.positive_time_period_milliseconds,
@@ -75,9 +73,6 @@ async def to_code(configs):
         if CONF_WATCHDOG_TIMEOUT in config:
             timeout_tpl = await cg.templatable(config[CONF_WATCHDOG_TIMEOUT], [], cg.uint32)
             cg.add(var.set_watchdog_timeout(timeout_tpl))
-        if CONF_VERIFY_SSL in config:
-            verify_ssl_tpl = await cg.templatable(config[CONF_VERIFY_SSL], [], cg.bool_)
-            cg.add(var.set_verify_ssl(verify_ssl_tpl))
         if CONF_HTTP_CONNECT_TIMEOUT in config:
             timeout_tpl = await cg.templatable(config[CONF_HTTP_CONNECT_TIMEOUT], [], cg.uint32)
             cg.add(var.set_http_connect_timeout(timeout_tpl))
