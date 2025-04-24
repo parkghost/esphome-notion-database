@@ -171,7 +171,7 @@ struct JsonAllocator {
 typedef BasicJsonDocument<JsonAllocator> CustomDynamicJsonDocument;
 
 // Process HTTP response
-uint32_t NotionDatabase::process_response_(WiFiClient &stream, size_t content_size,
+uint32_t NotionDatabase::process_response_(Stream &stream, size_t content_size,
                                            std::vector<Page, Allocator<Page>> &new_pages) {
   StreamMonitor stream_monitor(stream);
 
@@ -234,7 +234,6 @@ uint32_t NotionDatabase::process_response_(WiFiClient &stream, size_t content_si
     ESP_LOGD(TAG, "Pagination: Next cursor: %s", next_cursor_.c_str());
   }
   doc.clear();
-  stream.stop();
   return pages_hash;
 }
 

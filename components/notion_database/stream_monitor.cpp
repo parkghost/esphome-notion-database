@@ -3,18 +3,18 @@
 using namespace esphome;
 
 // Constructor
-StreamMonitor::StreamMonitor(WiFiClient &client) : client_(client), bytes_read_(0), bytes_written_(0) {}
+StreamMonitor::StreamMonitor(Stream &inner) : inner_(inner), bytes_read_(0), bytes_written_(0) {}
 
 // Returns the number of bytes available
 int StreamMonitor::available() {
   App.feed_wdt();
-  return client_.available();
+  return inner_.available();
 }
 
 // Reads a byte from the stream
 int StreamMonitor::read() {
   App.feed_wdt();
-  int result = client_.read();
+  int result = inner_.read();
   // Increment bytes_read_ if a byte was read
   if (result >= 0) {
     bytes_read_++;
@@ -25,7 +25,7 @@ int StreamMonitor::read() {
 // Reads up to size bytes from the stream
 int StreamMonitor::read(uint8_t *buf, size_t size) {
   App.feed_wdt();
-  int result = client_.read(buf, size);
+  int result = inner_.readBytes(reinterpret_cast<char *>(buf), size);
   // Increment bytes_read_ by the number of bytes read
   if (result > 0) {
     bytes_read_ += result;
@@ -36,41 +36,23 @@ int StreamMonitor::read(uint8_t *buf, size_t size) {
 // Peeks at the next byte in the stream
 int StreamMonitor::peek() {
   App.feed_wdt();
-  return client_.peek();
+  return inner_.peek();
 }
 
-// Writes a byte to the stream
-size_t StreamMonitor::write(uint8_t b) {
+// Writes a single byte to the stream
+size_t StreamMonitor::write(uint8_t byte) {
   App.feed_wdt();
-  size_t result = client_.write(b);
-  bytes_written_ += result;
-  return result;
+  size_t res = inner_.write(byte);
+  if (res > 0) bytes_written_ += res;
+  return res;
 }
 
-// Writes up to size bytes to the stream
+// Writes multiple bytes to the stream
 size_t StreamMonitor::write(const uint8_t *buf, size_t size) {
   App.feed_wdt();
-  size_t result = client_.write(buf, size);
-  bytes_written_ += result;
-  return result;
-}
-
-// Flushes the stream
-void StreamMonitor::flush() {
-  App.feed_wdt();
-  client_.flush();
-}
-
-// Stops the stream
-void StreamMonitor::stop() {
-  App.feed_wdt();
-  client_.stop();
-}
-
-// Returns the connection status
-uint8_t StreamMonitor::connected() {
-  App.feed_wdt();
-  return client_.connected();
+  size_t res = inner_.write(buf, size);
+  if (res > 0) bytes_written_ += res;
+  return res;
 }
 
 // Returns the number of bytes read

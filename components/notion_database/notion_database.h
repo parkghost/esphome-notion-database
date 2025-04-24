@@ -345,7 +345,7 @@ class NotionDatabase : public PollingComponent {
 
   bool send_request_();
   bool add_pagination_cursor_to_query_(std::string &payload);
-  uint32_t process_response_(WiFiClient &stream, size_t content_size, std::vector<Page, Allocator<Page>> &new_pages);
+  uint32_t process_response_(Stream &stream, size_t content_size, std::vector<Page, Allocator<Page>> &new_pages);
   uint32_t parse_page_(const JsonObject &pageJson, Page &page);
   bool parse_basic_property_(const JsonObject &property_obj, Page &page, const std::string &property_name);
   bool validate_config_();
