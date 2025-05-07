@@ -119,10 +119,10 @@ bool NotionDatabase::send_request_() {
   }
   ESP_LOGD(TAG, "Sending query: %s", payload.c_str());
 
-  ESP_LOGD(TAG, "Free heap(internal) before request: %u", ESP.getFreeHeap());
+  ESP_LOGD(TAG, "Before request: free heap:%u, max block:%u", ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
   App.feed_wdt();
   int http_code = http.POST(payload.c_str());
-  ESP_LOGD(TAG, "Free heap(internal) after request: %u", ESP.getFreeHeap());
+  ESP_LOGD(TAG, "After request: free heap:%u, max block:%u", ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
 
   // Process successful HTTP response
   if (http_code == HTTP_CODE_OK) {
@@ -134,7 +134,7 @@ bool NotionDatabase::send_request_() {
     if (new_pages_hash != 0) {
       check_changes_(new_pages, new_pages_hash);
     }
-    ESP_LOGD(TAG, "Free heap(internal) after parse json: %u", ESP.getFreeHeap());
+    ESP_LOGD(TAG, "After json parse: free heap:%u, max block:%u", ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
     return true;
   } else {
     // Handle HTTP request failure
