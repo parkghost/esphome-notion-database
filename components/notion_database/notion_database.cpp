@@ -81,7 +81,7 @@ bool NotionDatabase::validate_config_() {
   }
 
   if (!query_.value().empty()) {
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     if (deserializeJson(doc, query_.value()) != DeserializationError::Ok) {
       ESP_LOGE(TAG, "Invalid JSON query");
       return false;
@@ -145,7 +145,7 @@ bool NotionDatabase::send_request_() {
 }
 
 bool NotionDatabase::add_pagination_cursor_to_query_(std::string &payload) {
-  StaticJsonDocument<512> doc;
+  JsonDocument doc;
   if (deserializeJson(doc, payload) != DeserializationError::Ok) {
     ESP_LOGE(TAG, "Failed to parse query JSON for adding pagination cursor");
     return false;
@@ -158,17 +158,15 @@ bool NotionDatabase::add_pagination_cursor_to_query_(std::string &payload) {
   return true;
 }
 
-struct JsonAllocator {
-  void *allocate(size_t n) { return ALLOCATOR.allocate(n); }
+struct JsonAllocator : ArduinoJson::Allocator {
+  void *allocate(size_t n) override { return ALLOCATOR.allocate(n); }
 
-  void deallocate(void *p) { ALLOCATOR.deallocate(static_cast<uint8_t *>(p), 0); }
+  void deallocate(void *p) override { ALLOCATOR.deallocate(static_cast<uint8_t *>(p), 0); }
 
-  void *reallocate(void *p, size_t new_size) {
+  void *reallocate(void *p, size_t new_size) override {
     return ALLOCATOR.reallocate(static_cast<uint8_t *>(p), new_size, MALLOC_CAP_SPIRAM);
   }
 };
-
-typedef BasicJsonDocument<JsonAllocator> CustomDynamicJsonDocument;
 
 // Process HTTP response
 uint32_t NotionDatabase::process_response_(Stream &stream, size_t content_size,
@@ -191,7 +189,8 @@ uint32_t NotionDatabase::process_response_(Stream &stream, size_t content_size,
              "Consider reducing json_parse_buffer_size or increasing available heap.");
   }
 
-  CustomDynamicJsonDocument doc(doc_size);
+  static JsonAllocator allocator;
+  JsonDocument doc(&allocator);
   DeserializationError error = deserializeJson(doc, stream_monitor);
   ESP_LOGD(TAG, "Stream read bytes: %u", stream_monitor.get_bytes_read());
   if (error) {
@@ -361,7 +360,7 @@ uint32_t NotionDatabase::parse_page_(const JsonObject &pageJson, Page &page) {
 
       case NotionPropertyType::SELECT: {
         JsonObject select_obj = prop_obj["select"].as<JsonObject>();
-        property.string_value = (!select_obj.isNull() && select_obj.containsKey("name"))
+        property.string_value = (!select_obj.isNull() && select_obj["name"].is<const char*>())
                                     ? std::string(select_obj["name"] | "")
                                     : std::string("");
         break;

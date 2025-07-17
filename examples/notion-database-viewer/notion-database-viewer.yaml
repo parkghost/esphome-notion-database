@@ -584,9 +584,9 @@ script:
           }
           db->set_database_id(id(database_id).state);
 
-          StaticJsonDocument<1024> doc;
+          JsonDocument doc;
           if(id(query_filter).has_state() && !id(query_filter).state.empty()){
-            StaticJsonDocument<1024> filterDoc;
+            JsonDocument filterDoc;
             if(deserializeJson(filterDoc, id(query_filter).state) != DeserializationError::Ok){
               ESP_LOGE("notion", "Invalid filter: %s", id(query_filter).state.c_str());
               return;
@@ -595,7 +595,7 @@ script:
           }
 
           if(id(query_sorts).has_state() && !id(query_sorts).state.empty()){
-            StaticJsonDocument<1024> sortsDoc;
+            JsonDocument sortsDoc;
             if(deserializeJson(sortsDoc, id(query_sorts).state) != DeserializationError::Ok){
               ESP_LOGE("notion", "filter: %s", id(query_filter).state.c_str());
             }

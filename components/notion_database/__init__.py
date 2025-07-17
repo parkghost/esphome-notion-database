@@ -8,7 +8,7 @@ DEPENDENCIES = ["network"]
 AUTO_LOAD = ["json", "watchdog"]
 
 notion_database_ns = cg.esphome_ns.namespace("notion_database")
-NotionDatabase = notion_database_ns.class_("NotionDatabase", cg.PollingComponent, automation.Automation)
+NotionDatabase = notion_database_ns.class_("NotionDatabase", cg.PollingComponent)
 NotionDatabasePage = notion_database_ns.class_("Page")
 FirstPageAction = notion_database_ns.class_("FirstPageAction", automation.Action)
 NextPageAction = notion_database_ns.class_("NextPageAction", automation.Action)
@@ -48,7 +48,9 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_JSON_PARSE_BUFFER_SIZE, default="20kB"): cv.templatable(cv.validate_bytes),
         }).extend(cv.polling_component_schema('60s'))
     ),
+    cv.only_on_esp32,
     cv.only_with_arduino,
+    cv.require_esphome_version(2025, 7, 0)
 )
 
 async def to_code(configs):
@@ -83,7 +85,7 @@ async def to_code(configs):
             buffer_size_tpl = await cg.templatable(config[CONF_JSON_PARSE_BUFFER_SIZE], [], cg.uint32)
             cg.add(var.set_json_parse_buffer_size(buffer_size_tpl))
 
-    cg.add_library("WiFiClientSecure", None)
+    cg.add_library("NetworkClientSecure", None)
     cg.add_library("HTTPClient", None)
 
 NOTION_DATABASE_SCHEMA = maybe_simple_id(
