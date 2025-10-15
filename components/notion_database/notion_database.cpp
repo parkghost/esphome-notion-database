@@ -7,6 +7,7 @@
 #include <set>
 
 #include "allocator.h"
+#include "esphome/components/network/util.h"
 #include "esphome/components/watchdog/watchdog.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/time.h"
@@ -92,9 +93,8 @@ bool NotionDatabase::validate_config_() {
 
 // Send HTTP request
 bool NotionDatabase::send_request_() {
-  // Check WiFi connection
-  if (WiFi.status() != WL_CONNECTED) {
-    ESP_LOGW(TAG, "WiFi not connected");
+  if (!network::is_connected()) {
+    ESP_LOGW(TAG, "Network not connected");
     return false;
   }
 
