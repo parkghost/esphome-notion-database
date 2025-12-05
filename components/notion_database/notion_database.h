@@ -357,7 +357,14 @@ class FirstPageAction : public Action<Ts...> {
  public:
   explicit FirstPageAction(NotionDatabase *db) : db_(db) {}
 
-  void play(Ts... x) override { this->db_->first_page(); }
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+  void play(const Ts&... x) override
+#else
+  void play(Ts... x) override
+#endif
+  { 
+    this->db_->first_page();
+  }
 
  protected:
   NotionDatabase *db_;
@@ -368,7 +375,14 @@ class PreviousPageAction : public Action<Ts...> {
  public:
   explicit PreviousPageAction(NotionDatabase *db) : db_(db) {}
 
-  void play(Ts... x) override { this->db_->previous_page(); }
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+  void play(const Ts&... x) override
+#else
+  void play(Ts... x) override
+#endif
+  { 
+    this->db_->previous_page(); 
+  }
 
  protected:
   NotionDatabase *db_;
@@ -379,7 +393,14 @@ class NextPageAction : public Action<Ts...> {
  public:
   explicit NextPageAction(NotionDatabase *db) : db_(db) {}
 
-  void play(Ts... x) override { this->db_->next_page(); }
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 11, 0)
+  void play(const Ts&... x) override
+#else
+  void play(Ts... x) override
+#endif
+  {
+    this->db_->next_page(); 
+  }
 
  protected:
   NotionDatabase *db_;

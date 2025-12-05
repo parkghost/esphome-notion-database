@@ -38,6 +38,10 @@ external_components:
   - source: github://parkghost/esphome-epaper
     components: [ waveshare_epaper ]
 
+esp32:
+  framework:
+    type: arduino
+
 logger:
   level: VERBOSE
   # baud_rate: 0
@@ -106,7 +110,7 @@ notion_database_table_view:
     invert_title_color: !lambda return id(invert_title_color).state;
     invert_header_color: !lambda return id(invert_header_color).state;
     text_overflow: !lambda |-
-      return id(text_overflow).state == "ELLIPSIS" ? notion_database::TextOverflow::ELLIPSIS : notion_database::TextOverflow::CLIP;
+      return id(text_overflow).current_option() == "ELLIPSIS" ? notion_database::TextOverflow::ELLIPSIS : notion_database::TextOverflow::CLIP;
 
 time:
   - platform: sntp

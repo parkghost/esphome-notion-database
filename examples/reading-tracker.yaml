@@ -19,16 +19,8 @@ esphome:
   name: $device_name
   friendly_name: $friendly_name
 
-  platformio_options:
-    board_build.arduino.memory_type: qio_opi
-    board_build.flash_mode: qio
-    build_flags:
-      - "-DCONFIG_SPIRAM_CACHE_WORKAROUND"
-      - "-mfix-esp32-psram-cache-issue"
-
 esp32:
-  board: esp32-s3-devkitc-1
-  variant: esp32s3
+  board: esp32-s3-devkitc1-n16r8
   flash_size: 16MB
   framework:
     type: arduino
