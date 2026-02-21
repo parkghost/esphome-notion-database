@@ -85,6 +85,8 @@ async def to_code(configs):
             buffer_size_tpl = await cg.templatable(config[CONF_JSON_PARSE_BUFFER_SIZE], [], cg.uint32)
             cg.add(var.set_json_parse_buffer_size(buffer_size_tpl))
 
+    # WiFi auto-enables Network via Arduino library dependency mapping
+    cg.add_library("WiFi", None)
     cg.add_library("NetworkClientSecure", None)
     cg.add_library("HTTPClient", None)
 
