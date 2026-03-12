@@ -3,9 +3,10 @@ import esphome.config_validation as cv
 from esphome.const import CONF_ID
 from esphome import automation
 from esphome.automation import maybe_simple_id
+from esphome.components import http_request
 
-DEPENDENCIES = ["network"]
-AUTO_LOAD = ["json", "watchdog"]
+DEPENDENCIES = ["network", "http_request"]
+AUTO_LOAD = ["json"]
 
 notion_database_ns = cg.esphome_ns.namespace("notion_database")
 NotionDatabase = notion_database_ns.class_("NotionDatabase", cg.PollingComponent)
@@ -19,38 +20,24 @@ CONF_DATABASE_ID = "database_id"
 CONF_QUERY = "query"
 CONF_PROPERTY_FILTERS = "property_filters"
 CONF_ON_PAGE_CHANGE = "on_page_change"
-CONF_WATCHDOG_TIMEOUT = "watchdog_timeout"
-CONF_HTTP_CONNECT_TIMEOUT = "http_connect_timeout"
-CONF_HTTP_TIMEOUT = "http_timeout"
+CONF_HTTP_REQUEST_ID = "http_request_id"
 CONF_JSON_PARSE_BUFFER_SIZE = "json_parse_buffer_size"
 
 CONFIG_SCHEMA = cv.All(
     cv.ensure_list(
         cv.Schema({
             cv.GenerateID(): cv.declare_id(NotionDatabase),
+            cv.GenerateID(CONF_HTTP_REQUEST_ID): cv.use_id(http_request.HttpRequestComponent),
             cv.Optional(CONF_API_TOKEN, default=""): cv.templatable(cv.string),
             cv.Optional(CONF_DATABASE_ID, default=""): cv.templatable(cv.string),
             cv.Optional(CONF_QUERY, default=""): cv.templatable(cv.string),
             cv.Optional(CONF_PROPERTY_FILTERS, default=[]): cv.ensure_list(cv.string),
             cv.Optional(CONF_ON_PAGE_CHANGE): automation.validate_automation(),
-            cv.Optional(CONF_WATCHDOG_TIMEOUT, default="30s"): cv.templatable(cv.All(
-                cv.positive_not_null_time_period,
-                cv.positive_time_period_milliseconds,
-            )),
-            cv.Optional(CONF_HTTP_CONNECT_TIMEOUT, default="5s"): cv.templatable(cv.All(
-                cv.positive_not_null_time_period,
-                cv.positive_time_period_milliseconds,
-            )),
-            cv.Optional(CONF_HTTP_TIMEOUT, default="10s"): cv.templatable(cv.All(
-                cv.positive_not_null_time_period,
-                cv.positive_time_period_milliseconds,
-            )),
             cv.Optional(CONF_JSON_PARSE_BUFFER_SIZE, default="20kB"): cv.templatable(cv.validate_bytes),
         }).extend(cv.polling_component_schema('60s'))
     ),
     cv.only_on_esp32,
-    cv.only_with_arduino,
-    cv.require_esphome_version(2025, 7, 0)
+    cv.require_esphome_version(2026, 2, 0)
 )
 
 async def to_code(configs):
@@ -72,23 +59,12 @@ async def to_code(configs):
                     [],
                     trigger)
 
-        if CONF_WATCHDOG_TIMEOUT in config:
-            timeout_tpl = await cg.templatable(config[CONF_WATCHDOG_TIMEOUT], [], cg.uint32)
-            cg.add(var.set_watchdog_timeout(timeout_tpl))
-        if CONF_HTTP_CONNECT_TIMEOUT in config:
-            timeout_tpl = await cg.templatable(config[CONF_HTTP_CONNECT_TIMEOUT], [], cg.uint32)
-            cg.add(var.set_http_connect_timeout(timeout_tpl))
-        if CONF_HTTP_TIMEOUT in config:
-            timeout_tpl = await cg.templatable(config[CONF_HTTP_TIMEOUT], [], cg.uint32)
-            cg.add(var.set_http_timeout(timeout_tpl))
+        if CONF_HTTP_REQUEST_ID in config:
+            http_req = await cg.get_variable(config[CONF_HTTP_REQUEST_ID])
+            cg.add(var.set_http_request(http_req))
         if CONF_JSON_PARSE_BUFFER_SIZE in config:
             buffer_size_tpl = await cg.templatable(config[CONF_JSON_PARSE_BUFFER_SIZE], [], cg.uint32)
             cg.add(var.set_json_parse_buffer_size(buffer_size_tpl))
-
-    # WiFi auto-enables Network via Arduino library dependency mapping
-    cg.add_library("WiFi", None)
-    cg.add_library("NetworkClientSecure", None)
-    cg.add_library("HTTPClient", None)
 
 NOTION_DATABASE_SCHEMA = maybe_simple_id(
     {

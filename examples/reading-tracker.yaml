@@ -23,7 +23,7 @@ esp32:
   board: esp32-s3-devkitc1-n16r8
   flash_size: 16MB
   framework:
-    type: arduino
+    type: esp-idf
 
 psram:
   mode: octal
@@ -32,6 +32,11 @@ psram:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+
+http_request:
+  timeout: 10s
+  watchdog_timeout: 30s
+  verify_ssl: false
 
 notion_database:
   - id: db1

@@ -32,7 +32,7 @@ esp32:
   board: esp32-s3-devkitc1-n16r8
   flash_size: 16MB
   framework:
-    type: arduino
+    type: esp-idf
 
 psram:
   mode: octal
@@ -48,6 +48,11 @@ wifi:
         id: initial
         value: "true"
     - script.execute: pull_database
+
+http_request:
+  timeout: 10s
+  watchdog_timeout: 30s
+  verify_ssl: false
 
 globals:
   - id: initial

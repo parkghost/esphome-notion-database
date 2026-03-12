@@ -1,17 +1,15 @@
 #include "notion_database.h"
 
-#include <HTTPClient.h>
-
 #include <algorithm>
 #include <cctype>
+#include <list>
 #include <set>
 
 #include "allocator.h"
 #include "esphome/components/network/util.h"
-#include "esphome/components/watchdog/watchdog.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/time.h"
-#include "stream_monitor.h"
+#include "http_stream_adapter.h"
 
 namespace esphome {
 namespace notion_database {
@@ -58,9 +56,6 @@ void NotionDatabase::dump_config() {
   ESP_LOGCONFIG(TAG, "  API Token: %s", api_token_.value().empty() ? "not set" : "set");
   ESP_LOGCONFIG(TAG, "  Database ID: %s", database_id_.value().c_str());
   ESP_LOGCONFIG(TAG, "  Query: %s", query_.value().c_str());
-  ESP_LOGCONFIG(TAG, "  Watchdog Timeout: %u", watchdog_timeout_.value());
-  ESP_LOGCONFIG(TAG, "  HTTP Connect Timeout: %u", http_connect_timeout_.value());
-  ESP_LOGCONFIG(TAG, "  HTTP Timeout: %u", http_timeout_.value());
   ESP_LOGCONFIG(TAG, "  JSON Parser Buffer Size: %u", json_parse_buffer_size_.value());
   ESP_LOGCONFIG(TAG, "  Supported Property Types:");
   for (const auto &type : supported_property_types_) {
@@ -98,17 +93,12 @@ bool NotionDatabase::send_request_() {
     return false;
   }
 
-  watchdog::WatchdogManager wdm(this->watchdog_timeout_.value());
-  std::string url = "https://api.notion.com/v1/databases/" + database_id_.value() + "/query";
+  if (!this->http_request_) {
+    ESP_LOGE(TAG, "http_request component not configured");
+    return false;
+  }
 
-  HTTPClient http;
-  http.begin(url.c_str());
-  http.useHTTP10(true);
-  http.setConnectTimeout(http_connect_timeout_.value());
-  http.setTimeout(http_timeout_.value());
-  http.addHeader("Authorization", ("Bearer " + api_token_.value()).c_str());
-  http.addHeader("Notion-Version", "2022-06-28");
-  http.addHeader("Content-Type", "application/json");
+  std::string url = "https://api.notion.com/v1/databases/" + database_id_.value() + "/query";
 
   std::string payload = query_.value();
   if (!current_cursor_.empty()) {
@@ -119,29 +109,45 @@ bool NotionDatabase::send_request_() {
   }
   ESP_LOGD(TAG, "Sending query: %s", payload.c_str());
 
-  ESP_LOGD(TAG, "Before request: free heap:%u, max block:%u", ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
-  App.feed_wdt();
-  int http_code = http.POST(payload.c_str());
-  ESP_LOGD(TAG, "After request: free heap:%u, max block:%u", ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+  std::list<http_request::Header> headers;
+  headers.push_back({"Authorization", "Bearer " + api_token_.value()});
+  headers.push_back({"Notion-Version", "2022-06-28"});
+  headers.push_back({"Content-Type", "application/json"});
 
-  // Process successful HTTP response
-  if (http_code == HTTP_CODE_OK) {
-    App.feed_wdt();
-    std::vector<Page, Allocator<Page>> new_pages;
-    uint32_t new_pages_hash = process_response_(http.getStream(), http.getSize(), new_pages);
-    http.end();
-    // Check for changes if parsing was successful
-    if (new_pages_hash != 0) {
-      check_changes_(new_pages, new_pages_hash);
-    }
-    ESP_LOGD(TAG, "After json parse: free heap:%u, max block:%u", ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
-    return true;
-  } else {
-    // Handle HTTP request failure
-    ESP_LOGE(TAG, "HTTP request failed, code: %d, error: %s", http_code, http.getString().c_str());
-    http.end();
+  ESP_LOGD(TAG, "Before request: free heap:%lu, max block:%u",
+           (unsigned long) esp_get_free_heap_size(),
+           (unsigned) heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  App.feed_wdt();
+  auto container = this->http_request_->post(url, payload, headers);
+  ESP_LOGD(TAG, "After request: free heap:%lu, max block:%u",
+           (unsigned long) esp_get_free_heap_size(),
+           (unsigned) heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+  if (container == nullptr) {
+    ESP_LOGE(TAG, "HTTP request failed: no response");
     return false;
   }
+
+  if (container->status_code != 200) {
+    ESP_LOGE(TAG, "HTTP request failed, code: %d", container->status_code);
+    container->end();
+    return false;
+  }
+
+  // Success path
+  App.feed_wdt();
+  HttpStreamAdapter stream(container, 1024, this->http_request_->get_timeout());
+  std::vector<Page, Allocator<Page>> new_pages;
+  uint32_t new_pages_hash = process_response_(stream, new_pages);
+  container->end();
+
+  if (new_pages_hash != 0) {
+    check_changes_(new_pages, new_pages_hash);
+  }
+  ESP_LOGD(TAG, "After json parse: free heap:%lu, max block:%u",
+           (unsigned long) esp_get_free_heap_size(),
+           (unsigned) heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  return true;
 }
 
 bool NotionDatabase::add_pagination_cursor_to_query_(std::string &payload) {
@@ -169,17 +175,12 @@ struct JsonAllocator : ArduinoJson::Allocator {
 };
 
 // Process HTTP response
-uint32_t NotionDatabase::process_response_(Stream &stream, size_t content_size,
+uint32_t NotionDatabase::process_response_(HttpStreamAdapter &stream,
                                            std::vector<Page, Allocator<Page>> &new_pages) {
-  StreamMonitor stream_monitor(stream);
-
   auto free_heap = ALLOCATOR.get_max_free_block_size();
-  ESP_LOGD(TAG, "Content Size: %d, Free heap: %u, JSON Parse Buffer Size: %u", content_size, free_heap,
-           json_parse_buffer_size_.value());
+  ESP_LOGD(TAG, "Free heap: %u, JSON Parse Buffer Size: %u", free_heap, json_parse_buffer_size_.value());
 
-  size_t doc_size =
-      std::min({static_cast<size_t>(free_heap - 2048), static_cast<size_t>(json_parse_buffer_size_.value()),
-                content_size > 0 ? static_cast<size_t>(content_size * 1.5f) : SIZE_MAX});
+  size_t doc_size = std::min(static_cast<size_t>(free_heap - 2048), static_cast<size_t>(json_parse_buffer_size_.value()));
 
   ESP_LOGD(TAG, "Allocating %u bytes for JSON document", doc_size);
 
@@ -191,8 +192,8 @@ uint32_t NotionDatabase::process_response_(Stream &stream, size_t content_size,
 
   static JsonAllocator allocator;
   JsonDocument doc(&allocator);
-  DeserializationError error = deserializeJson(doc, stream_monitor);
-  ESP_LOGD(TAG, "Stream read bytes: %u", stream_monitor.get_bytes_read());
+  DeserializationError error = deserializeJson(doc, stream);
+  ESP_LOGD(TAG, "Stream read bytes: %u", stream.getBytesRead());
   if (error) {
     ESP_LOGE(TAG, "JSON parsing failed: %s", error.c_str());
     doc.clear();
@@ -211,7 +212,8 @@ uint32_t NotionDatabase::process_response_(Stream &stream, size_t content_size,
     new_pages.push_back(std::move(page));
     App.feed_wdt();
 #if ESP_LOG_LEVEL >= ESP_LOG_VERBOSE
-    ESP_LOGV(TAG, "Free heap(internal) after parse_page %d: %u", ++i, ESP.getFreeHeap());
+    ESP_LOGV(TAG, "Free heap(internal) after parse_page %d: %lu", ++i,
+             (unsigned long) esp_get_free_heap_size());
 #endif
   }
 

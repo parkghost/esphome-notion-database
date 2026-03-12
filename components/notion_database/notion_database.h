@@ -12,8 +12,11 @@
 
 #include "allocator.h"
 #include "esphome.h"
+#include "esphome/components/http_request/http_request.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
+
+#include "http_stream_adapter.h"
 
 namespace esphome {
 namespace notion_database {
@@ -250,23 +253,8 @@ class NotionDatabase : public PollingComponent {
   // Returns the on_page_change trigger
   Trigger<> *get_on_page_change_trigger() { return &this->on_page_change_trigger_; }
 
-  // Sets the watchdog timeout
-  template <typename V>
-  void set_watchdog_timeout(V watchdog_timeout) {
-    watchdog_timeout_ = watchdog_timeout;
-  }
-
-  // Sets the HTTP connect timeout
-  template <typename V>
-  void set_http_connect_timeout(V http_connect_timeout) {
-    http_connect_timeout_ = http_connect_timeout;
-  }
-
-  // Sets the HTTP timeout
-  template <typename V>
-  void set_http_timeout(V http_timeout) {
-    http_timeout_ = http_timeout;
-  }
+  // Sets the http_request component
+  void set_http_request(http_request::HttpRequestComponent *http_request) { http_request_ = http_request; }
 
   // Sets the JSON parse buffer size
   template <typename V>
@@ -321,9 +309,7 @@ class NotionDatabase : public PollingComponent {
   TemplatableValue<std::string> query_;
   Trigger<> on_page_change_trigger_{};
 
-  TemplatableValue<uint32_t> watchdog_timeout_;
-  TemplatableValue<uint32_t> http_connect_timeout_;
-  TemplatableValue<uint32_t> http_timeout_;
+  http_request::HttpRequestComponent *http_request_{nullptr};
   TemplatableValue<uint32_t> json_parse_buffer_size_;
 
   std::set<std::string> available_properties_;
@@ -345,7 +331,7 @@ class NotionDatabase : public PollingComponent {
 
   bool send_request_();
   bool add_pagination_cursor_to_query_(std::string &payload);
-  uint32_t process_response_(Stream &stream, size_t content_size, std::vector<Page, Allocator<Page>> &new_pages);
+  uint32_t process_response_(HttpStreamAdapter &stream, std::vector<Page, Allocator<Page>> &new_pages);
   uint32_t parse_page_(const JsonObject &pageJson, Page &page);
   bool parse_basic_property_(const JsonObject &property_obj, Page &page, const std::string &property_name);
   bool validate_config_();
