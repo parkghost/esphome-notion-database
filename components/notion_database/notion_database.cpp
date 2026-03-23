@@ -520,13 +520,23 @@ bool NotionProperty::parse_time_from_iso8601(const std::string &iso_time) {
   time_value.tm_min = min;
   time_value.tm_sec = sec;
 
-  int32_t tz_offset = esphome::ESPTime::timezone_offset();
-
-  time_t epoch_time = mktime(&time_value);
-
-  epoch_time += tz_offset;
-
-  time_value = *localtime(&epoch_time);
+  // Convert UTC fields to local time using ESPTime instead of
+  // mktime()+tz_offset+localtime(), which no longer works on embedded
+  // platforms since ESPHome 2026.3 removed setenv("TZ")/tzset().
+  ESPTime utc_time{};
+  utc_time.second = time_value.tm_sec;
+  utc_time.minute = time_value.tm_min;
+  utc_time.hour = time_value.tm_hour;
+  utc_time.day_of_month = time_value.tm_mday;
+  utc_time.month = time_value.tm_mon + 1;
+  utc_time.year = time_value.tm_year + 1900;
+  utc_time.day_of_week = 1;
+  uint16_t doy = utc_time.day_of_month;
+  for (uint8_t i = 1; i < utc_time.month; i++)
+    doy += days_in_month(i, utc_time.year);
+  utc_time.day_of_year = doy;
+  utc_time.recalc_timestamp_utc(false);
+  time_value = ESPTime::from_epoch_local(utc_time.timestamp).to_c_tm();
 
   return true;
 }
