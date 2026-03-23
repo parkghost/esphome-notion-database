@@ -72,17 +72,17 @@ NOTION_DATABASE_SCHEMA = maybe_simple_id(
     }
 )
 
-@automation.register_action("notion_database.first_page", FirstPageAction, NOTION_DATABASE_SCHEMA)
+@automation.register_action("notion_database.first_page", FirstPageAction, NOTION_DATABASE_SCHEMA, synchronous=True)
 async def notion_database_first_page_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
     return cg.new_Pvariable(action_id, template_arg, paren)
 
-@automation.register_action("notion_database.next_page", NextPageAction, NOTION_DATABASE_SCHEMA)
+@automation.register_action("notion_database.next_page", NextPageAction, NOTION_DATABASE_SCHEMA, synchronous=True)
 async def notion_database_next_page_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
     return cg.new_Pvariable(action_id, template_arg, paren)
 
-@automation.register_action("notion_database.prev_page", PreviousPageAction, NOTION_DATABASE_SCHEMA)
+@automation.register_action("notion_database.prev_page", PreviousPageAction, NOTION_DATABASE_SCHEMA, synchronous=True)
 async def notion_database_prev_page_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
     return cg.new_Pvariable(action_id, template_arg, paren)

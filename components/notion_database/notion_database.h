@@ -5,18 +5,50 @@
  */
 
 #include <set>
-#include <sstream>  // add if not already included
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include "allocator.h"
+#include "esphome/core/helpers.h"
+
+#ifdef USE_ESP32
+#include "esp_heap_caps.h"
+#ifdef USE_PSRAM
+#include "esp_psram.h"
+#endif
+#endif
+
+#ifdef USE_PSRAM
+#define NOTION_PSRAM_AVAILABLE() esp_psram_is_initialized()
+#else
+#define NOTION_PSRAM_AVAILABLE() false
+#endif
+
+namespace esphome {
+
+// Add missing operator== for RAMAllocator to support std::vector move operations
+template<class T>
+bool operator==(const RAMAllocator<T>& lhs, const RAMAllocator<T>& rhs) {
+  return true;
+}
+
+namespace notion_database {
+
+// Forward declaration for PageVector alias (needed before esphome.h pulls in table_view.h)
+struct Page;
+using PageVector = std::vector<Page, RAMAllocator<Page>>;
+
+}  // namespace notion_database
+}  // namespace esphome
+
 #include "esphome.h"
 #include "esphome/components/http_request/http_request.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 
 #include "http_stream_adapter.h"
+#include "psram_string.h"
 
 namespace esphome {
 namespace notion_database {
@@ -54,13 +86,17 @@ enum class NotionPropertyType {
 struct NotionProperty {
   NotionPropertyType type;
   // Use these members depending on which type is active.
-  std::string string_value;
+  PsramString string_value;
   double number_value;
   bool bool_value;
-  std::vector<std::string> vector_value;
+  std::vector<PsramString, RAMAllocator<PsramString>> vector_value;
   std::tm time_value;
 
-  NotionProperty() : type(NotionPropertyType::UNKNOWN), number_value(0.0), bool_value(false) {
+  NotionProperty()
+      : type(NotionPropertyType::UNKNOWN),
+        number_value(0.0),
+        bool_value(false),
+        vector_value(RAMAllocator<PsramString>(RAMAllocator<PsramString>::NONE)) {
     // Initialize time_value to epoch (1970-01-01)
     std::memset(&time_value, 0, sizeof(time_value));
   }
@@ -76,28 +112,28 @@ const static std::string NOTION_LAST_EDITED_TIME_KEY = "Last Edited Time";
 const static std::string NOTION_ARCHIVED_KEY = "Archived";
 const static std::string NOTION_IN_TRASH_KEY = "In Trash";
 
-struct Page {
-  std::vector<std::pair<uint32_t, NotionProperty>> properties;
+using PropertyPair = std::pair<std::string, NotionProperty>;
 
-  uint32_t hash_key(const std::string &key) const { return static_cast<uint32_t>(std::hash<std::string>{}(key)); }
+struct Page {
+  std::vector<PropertyPair, RAMAllocator<PropertyPair>> properties;
+
+  Page() : properties(RAMAllocator<PropertyPair>(RAMAllocator<PropertyPair>::NONE)) {}
 
   const NotionProperty *get_property(const std::string &key) const {
-    uint32_t h = hash_key(key);
     for (const auto &kv : properties) {
-      if (kv.first == h) return &kv.second;
+      if (kv.first == key) return &kv.second;
     }
     return nullptr;
   }
 
   void set_property(const std::string &key, const NotionProperty &prop) {
-    uint32_t h = hash_key(key);
     for (auto &kv : properties) {
-      if (kv.first == h) {
+      if (kv.first == key) {
         kv.second = prop;
         return;
       }
     }
-    properties.push_back({h, prop});
+    properties.push_back({key, prop});
   }
 };
 
@@ -269,7 +305,7 @@ class NotionDatabase : public PollingComponent {
   // Returns the has_page_change flag
   bool has_page_change() const { return has_page_change_flag_; }
   // Returns the pages
-  const std::vector<Page, Allocator<Page>> &get_pages() const { return pages_; }
+  const PageVector &get_pages() const { return pages_; }
 
   // Adds a property filter
   void add_property_filter(const std::string &property_name) {
@@ -314,7 +350,7 @@ class NotionDatabase : public PollingComponent {
 
   std::set<std::string> available_properties_;
   std::set<std::string> property_filters_;
-  std::vector<Page, Allocator<Page>> pages_;
+  PageVector pages_;
   uint32_t pages_hash_ = 0;
   bool has_page_change_flag_{false};
   bool has_more_{false};
@@ -326,16 +362,16 @@ class NotionDatabase : public PollingComponent {
       NotionPropertyType::CREATED_TIME, NotionPropertyType::DATE,   NotionPropertyType::EMAIL,
       NotionPropertyType::MULTI_SELECT, NotionPropertyType::NUMBER, NotionPropertyType::PHONE_NUMBER,
       NotionPropertyType::RICH_TEXT,    NotionPropertyType::SELECT, NotionPropertyType::STATUS,
-      NotionPropertyType::STATUS,       NotionPropertyType::TITLE,  NotionPropertyType::URL,
+      NotionPropertyType::CHECKBOX,     NotionPropertyType::TITLE,  NotionPropertyType::URL,
   };
 
   bool send_request_();
   bool add_pagination_cursor_to_query_(std::string &payload);
-  uint32_t process_response_(HttpStreamAdapter &stream, std::vector<Page, Allocator<Page>> &new_pages);
+  uint32_t process_response_(HttpStreamAdapter &stream, PageVector &new_pages);
   uint32_t parse_page_(const JsonObject &pageJson, Page &page);
   bool parse_basic_property_(const JsonObject &property_obj, Page &page, const std::string &property_name);
   bool validate_config_();
-  void check_changes_(const std::vector<Page, Allocator<Page>> &new_pages, uint32_t new_pages_hash);
+  void check_changes_(PageVector &&new_pages, uint32_t new_pages_hash);
 };
 
 template <typename... Ts>
@@ -348,7 +384,7 @@ class FirstPageAction : public Action<Ts...> {
 #else
   void play(Ts... x) override
 #endif
-  { 
+  {
     this->db_->first_page();
   }
 
@@ -366,8 +402,8 @@ class PreviousPageAction : public Action<Ts...> {
 #else
   void play(Ts... x) override
 #endif
-  { 
-    this->db_->previous_page(); 
+  {
+    this->db_->previous_page();
   }
 
  protected:
@@ -385,7 +421,7 @@ class NextPageAction : public Action<Ts...> {
   void play(Ts... x) override
 #endif
   {
-    this->db_->next_page(); 
+    this->db_->next_page();
   }
 
  protected:

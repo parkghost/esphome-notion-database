@@ -2,10 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
-#include <list>
 #include <set>
 
-#include "allocator.h"
 #include "esphome/components/network/util.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/time.h"
@@ -17,7 +15,7 @@ namespace notion_database {
 static const char *const TAG = "notion_database";
 
 std::string tm_to_date(const std::tm &tm_time) {
-  char buffer[10];
+  char buffer[11];
   std::strftime(buffer, sizeof(buffer), "%Y-%m-%d", &tm_time);
   return std::string(buffer);
 }
@@ -57,6 +55,9 @@ void NotionDatabase::dump_config() {
   ESP_LOGCONFIG(TAG, "  Database ID: %s", database_id_.value().c_str());
   ESP_LOGCONFIG(TAG, "  Query: %s", query_.value().c_str());
   ESP_LOGCONFIG(TAG, "  JSON Parser Buffer Size: %u", json_parse_buffer_size_.value());
+#ifdef USE_PSRAM
+  ESP_LOGCONFIG(TAG, "  PSRAM: %s", NOTION_PSRAM_AVAILABLE() ? "available" : "not available");
+#endif
   ESP_LOGCONFIG(TAG, "  Supported Property Types:");
   for (const auto &type : supported_property_types_) {
     ESP_LOGCONFIG(TAG, "    - %s", notion_property_type_to_string(type).c_str());
@@ -109,7 +110,7 @@ bool NotionDatabase::send_request_() {
   }
   ESP_LOGD(TAG, "Sending query: %s", payload.c_str());
 
-  std::list<http_request::Header> headers;
+  std::vector<http_request::Header> headers;
   headers.push_back({"Authorization", "Bearer " + api_token_.value()});
   headers.push_back({"Notion-Version", "2022-06-28"});
   headers.push_back({"Content-Type", "application/json"});
@@ -137,12 +138,12 @@ bool NotionDatabase::send_request_() {
   // Success path
   App.feed_wdt();
   HttpStreamAdapter stream(container, 1024, this->http_request_->get_timeout());
-  std::vector<Page, Allocator<Page>> new_pages;
+  PageVector new_pages;
   uint32_t new_pages_hash = process_response_(stream, new_pages);
   container->end();
 
   if (new_pages_hash != 0) {
-    check_changes_(new_pages, new_pages_hash);
+    check_changes_(std::move(new_pages), new_pages_hash);
   }
   ESP_LOGD(TAG, "After json parse: free heap:%lu, max block:%u",
            (unsigned long) esp_get_free_heap_size(),
@@ -165,19 +166,31 @@ bool NotionDatabase::add_pagination_cursor_to_query_(std::string &payload) {
 }
 
 struct JsonAllocator : ArduinoJson::Allocator {
-  void *allocate(size_t n) override { return ALLOCATOR.allocate(n); }
+  void *allocate(size_t n) override {
+#ifdef USE_PSRAM
+    if (NOTION_PSRAM_AVAILABLE()) {
+      return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+#endif
+    return malloc(n);
+  }
 
-  void deallocate(void *p) override { ALLOCATOR.deallocate(static_cast<uint8_t *>(p), 0); }
+  void deallocate(void *p) override { free(p); }
 
   void *reallocate(void *p, size_t new_size) override {
-    return ALLOCATOR.reallocate(static_cast<uint8_t *>(p), new_size, MALLOC_CAP_SPIRAM);
+#ifdef USE_PSRAM
+    if (NOTION_PSRAM_AVAILABLE()) {
+      return heap_caps_realloc(p, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+#endif
+    return realloc(p, new_size);
   }
 };
 
 // Process HTTP response
-uint32_t NotionDatabase::process_response_(HttpStreamAdapter &stream,
-                                           std::vector<Page, Allocator<Page>> &new_pages) {
-  auto free_heap = ALLOCATOR.get_max_free_block_size();
+uint32_t NotionDatabase::process_response_(HttpStreamAdapter &stream, PageVector &new_pages) {
+  RAMAllocator<uint8_t> ram_alloc;
+  auto free_heap = ram_alloc.get_max_free_block_size();
   ESP_LOGD(TAG, "Free heap: %u, JSON Parse Buffer Size: %u", free_heap, json_parse_buffer_size_.value());
 
   size_t doc_size = std::min(static_cast<size_t>(free_heap - 2048), static_cast<size_t>(json_parse_buffer_size_.value()));
@@ -330,12 +343,13 @@ uint32_t NotionDatabase::parse_page_(const JsonObject &pageJson, Page &page) {
       }
 
       case NotionPropertyType::RICH_TEXT: {
-        std::vector<std::string> texts;
+        std::vector<PsramString, RAMAllocator<PsramString>> texts(
+            RAMAllocator<PsramString>(RAMAllocator<PsramString>::NONE));
         JsonArray text_arr = prop_obj["rich_text"].as<JsonArray>();
         for (JsonObject text_obj : text_arr) {
-          texts.push_back((const char *)(text_obj["plain_text"] | ""));
+          texts.push_back(PsramString(text_obj["plain_text"] | ""));
         }
-        property.vector_value = texts;
+        property.vector_value = std::move(texts);
         break;
       }
 
@@ -363,51 +377,50 @@ uint32_t NotionDatabase::parse_page_(const JsonObject &pageJson, Page &page) {
       case NotionPropertyType::SELECT: {
         JsonObject select_obj = prop_obj["select"].as<JsonObject>();
         property.string_value = (!select_obj.isNull() && select_obj["name"].is<const char*>())
-                                    ? std::string(select_obj["name"] | "")
-                                    : std::string("");
+                                    ? (select_obj["name"] | "")
+                                    : "";
         break;
       }
 
       case NotionPropertyType::MULTI_SELECT: {
-        std::vector<std::string> names;
+        std::vector<PsramString, RAMAllocator<PsramString>> names(
+            RAMAllocator<PsramString>(RAMAllocator<PsramString>::NONE));
         JsonArray ms_array = prop_obj["multi_select"].as<JsonArray>();
         for (JsonObject ms_obj : ms_array) {
-          names.push_back((const char *)(ms_obj["name"] | ""));
+          names.push_back(PsramString(ms_obj["name"] | ""));
         }
-        property.vector_value = names;
+        property.vector_value = std::move(names);
         break;
       }
 
       case NotionPropertyType::CREATED_TIME: {
-        std::string temp_str = std::string(prop_obj["created_time"] | "");
-        property.parse_time_from_iso8601(temp_str);
+        property.parse_time_from_iso8601(prop_obj["created_time"] | "");
         break;
       }
 
       case NotionPropertyType::EMAIL: {
-        property.string_value = std::string(prop_obj["email"] | "");
+        property.string_value = prop_obj["email"] | "";
         break;
       }
 
       case NotionPropertyType::LAST_EDITED_TIME: {
-        std::string temp_str = std::string(prop_obj["last_edited_time"] | "");
-        property.parse_time_from_iso8601(temp_str);
+        property.parse_time_from_iso8601(prop_obj["last_edited_time"] | "");
         break;
       }
 
       case NotionPropertyType::PHONE_NUMBER: {
-        property.string_value = std::string(prop_obj["phone_number"] | "");
+        property.string_value = prop_obj["phone_number"] | "";
         break;
       }
 
       case NotionPropertyType::STATUS: {
         JsonObject status_obj = prop_obj["status"].as<JsonObject>();
-        property.string_value = std::string(status_obj["name"] | "");
+        property.string_value = status_obj["name"] | "";
         break;
       }
 
       case NotionPropertyType::URL: {
-        property.string_value = std::string(prop_obj["url"] | "");
+        property.string_value = prop_obj["url"] | "";
         break;
       }
 
@@ -438,7 +451,7 @@ uint32_t NotionDatabase::parse_page_(const JsonObject &pageJson, Page &page) {
 }
 
 // Check for page changes
-void NotionDatabase::check_changes_(const std::vector<Page, Allocator<Page>> &new_pages, uint32_t new_pages_hash) {
+void NotionDatabase::check_changes_(PageVector &&new_pages, uint32_t new_pages_hash) {
   ESP_LOGD(TAG, "Previous pages hash: %u", pages_hash_);
   ESP_LOGD(TAG, "New pages hash: %u", new_pages_hash);
 

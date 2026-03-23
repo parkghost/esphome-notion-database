@@ -3,7 +3,6 @@
 #include <vector>
 
 #include "esphome/components/display/display.h"
-#include "esphome/components/notion_database/allocator.h"
 #include "esphome/components/notion_database/notion_database.h"
 
 namespace esphome {
@@ -100,7 +99,7 @@ class NotionDatabaseTableView : public Component {
     trimmed_column.erase(0, trimmed_column.find_first_not_of(" \t\n\r"));
     trimmed_column.erase(trimmed_column.find_last_not_of(" \t\n\r") + 1);
     if (!trimmed_column.empty()) {
-      this->columns_.push_back(column);
+      this->columns_.push_back(trimmed_column);
     }
   }
 
@@ -114,7 +113,7 @@ class NotionDatabaseTableView : public Component {
   void set_column_widths(const std::vector<int> &widths) { this->column_widths_ = widths; }
 
  protected:
-  NotionDatabase *database_parent_;  // Parent database
+  NotionDatabase *database_parent_{nullptr};  // Parent database
 
   TemplatableValue<int> line_height_;
   TemplatableValue<bool> enable_grid_line_;
@@ -134,7 +133,7 @@ class NotionDatabaseTableView : public Component {
   std::vector<int> column_widths_;
 
   std::vector<int> calculate_column_widths_(display::Display &it, int width, font::Font *font,
-                                            const std::vector<Page, Allocator<Page>> &pages);
+                                            const PageVector &pages);
 
   void print_row_(display::Display &it, int x, int &current_y, int table_width, bool is_header_row,
                   const std::vector<std::string> &texts, const std::vector<int> &col_widths, font::Font *font,
@@ -152,7 +151,7 @@ class NotionDatabaseTableView : public Component {
 };
 
 inline std::string tm_to_datetime(const std::tm &tm_time, const std::string &format) {
-  char buffer[25];
+  char buffer[64];
   std::strftime(buffer, sizeof(buffer), format.c_str(), &tm_time);
   return std::string(buffer);
 }

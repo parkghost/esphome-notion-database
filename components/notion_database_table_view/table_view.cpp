@@ -19,7 +19,7 @@ void NotionDatabaseTableView::draw(display::Display &it, int x, int y, int width
     this->columns_ = std::vector<std::string>(available_properties.begin(), available_properties.end());
   }
 
-  auto pages = this->database_parent_->get_pages();
+  const auto &pages = this->database_parent_->get_pages();
   std::vector<int> col_widths = calculate_column_widths_(it, width, font, pages);
 
   int current_y = y;
@@ -88,7 +88,7 @@ void NotionDatabaseTableView::draw(display::Display &it, int x, int y, int width
 }
 
 std::vector<int> NotionDatabaseTableView::calculate_column_widths_(display::Display &it, int width, font::Font *font,
-                                                                   const std::vector<Page, Allocator<Page>> &pages) {
+                                                                   const PageVector &pages) {
   const int right_padding = 10;
   std::vector<int> col_widths(columns_.size(), 0);
   int total_width = 0;
